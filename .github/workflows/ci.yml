@@ -1,0 +1,27 @@
+name: CI - Patient Service (Maven Wrapper)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  build-patient-service:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission to mvnw
+        run: chmod +x patient-service/mvnw
+
+      - name: Build patient-service using Maven Wrapper
+        working-directory: patient-service
+        run: ./mvnw clean package
