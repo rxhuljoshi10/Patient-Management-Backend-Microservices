@@ -1,4 +1,4 @@
-name: CI - Patient Service (Maven Wrapper)
+name: CI - All Services
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: admin
         ports:
-          - 5000:5432
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -37,6 +37,55 @@ jobs:
       - name: Grant execute permission to mvnw
         run: chmod +x patient-service/mvnw
 
-      - name: Build patient-service using Maven Wrapper
+      - name: Build and test patient-service
         working-directory: patient-service
-        run: ./mvnw clean package -DskipTests
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/patient_db
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: admin
+          SPRING_KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          BILLING_SERVICE_ADDRESS: localhost
+          BILLING_SERVICE_GRPC_PORT: 9001
+        run: ./mvnw clean package
+
+  build-billing-service:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission to mvnw
+        run: chmod +x billing-service/mvnw
+
+      - name: Build and test billing-service
+        working-directory: billing-service
+        run: ./mvnw clean package
+
+  build-analytics-service:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission to mvnw
+        run: chmod +x analytics-service/mvnw
+
+      - name: Build and test analytics-service
+        working-directory: analytics-service
+        env:
+          SPRING_KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+        run: ./mvnw clean package
