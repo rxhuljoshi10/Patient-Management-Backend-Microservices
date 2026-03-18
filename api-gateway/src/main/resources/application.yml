@@ -13,7 +13,8 @@ spring:
               predicates:
                 - Path=/api/patients/**
               filters:
-                - StripPrefix=1
+                - StripPrefix=1 #Remove first word from endpoint ("/api" is removed)
+                - JwtValidation #Makes this endpoint pass through jwt validation
             # -> http://patient-service:4000/patients/get-patients
 
             - id: api-docs-patient-route
