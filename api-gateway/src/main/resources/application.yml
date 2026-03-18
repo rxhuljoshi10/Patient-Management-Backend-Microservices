@@ -7,12 +7,14 @@ spring:
       server:
         webflux:
           routes:
+            #http://localhost:4004/api/patients/get-patients
             - id: patient-service-route
               uri: http://patient-service:4000
               predicates:
                 - Path=/api/patients/**
               filters:
                 - StripPrefix=1
+            # -> http://patient-service:4000/patients/get-patients
 
             - id: api-docs-patient-route
               uri: http://patient-service:4000
@@ -20,3 +22,12 @@ spring:
                 - Path=/api-docs/patients
               filters:
                 - RewritePath=/api-docs/patients, /v3/api-docs
+
+            #http://localhost:4004/auth/login
+            - id: auth-service-route
+              uri: http://auth-service:4005
+              predicates:
+                - Path=/auth/**
+              filters:
+                - StripPrefix=1
+            # -> http://auth-service:4005/login
