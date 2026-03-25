@@ -25,6 +25,13 @@ public class PatientController {
         this.patientService = patientService;
     }
 
+    @GetMapping("/get-patient/{id}")
+    @Operation(summary = "Get Patient details of specific ID")
+    public ResponseEntity<PatientResponseDTO> getPatient(@PathVariable UUID id){
+        PatientResponseDTO patientResponseDTO = patientService.getPatient(id);
+        return ResponseEntity.ok().body(patientResponseDTO);
+    }
+
     @GetMapping("/get-patients")
     @Operation(summary = "Get all Patients")
     public ResponseEntity<List<PatientResponseDTO>> getPatients(){
