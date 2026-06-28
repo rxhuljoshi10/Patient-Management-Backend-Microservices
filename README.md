@@ -1,391 +1,395 @@
-﻿# Patient Management Platform
+# Distributed Microservice Backend Platform
+
+A backend system built with a microservices architecture to demonstrate real-world distributed systems patterns — service communication via REST, gRPC, and Kafka, JWT-based authentication, Redis caching, and deployment on Docker and Kubernetes.
+
+> **Practice project** — built for learning and portfolio purposes. Not a production product.
+
+[![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-blue?logo=docker)](https://www.docker.com/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-Deployed-326CE5?logo=kubernetes)](https://kubernetes.io/)
+[![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.7-black?logo=apachekafka)](https://kafka.apache.org/)
+[![Redis](https://img.shields.io/badge/Redis-7-red?logo=redis)](https://redis.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue?logo=postgresql)](https://www.postgresql.org/)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions)](https://github.com/features/actions)
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Services](#services)
+- [How to Run](#how-to-run)
+  - [Option A — Docker](#option-a--docker)
+  - [Option B — Kubernetes](#option-b--kubernetes)
+- [API Reference](#api-reference)
+- [Project Structure](#project-structure)
+
+---
 
 ## Overview
-This repository implements a microservice-based patient management system using Spring Boot (Java 21):
-- **api-gateway**: Spring Cloud Gateway routes requests and performs JWT validation
-- **auth-service**: login + JWT issuance/validation
-- **patient-service**: patient CRUD backed by PostgreSQL, plus Kafka, gRPC, and Redis caching integrations
-- **billing-service**: gRPC server that creates billing accounts
-- **analytics-service**: Kafka consumer that processes patient events
-- **integration-tests**: RestAssured end-to-end tests against the gateway
-- **redis**: In-memory cache for high-performance patient data retrieval
 
-## Architecture / Runtime Flow
+> 🎓 **This is a practice project** — built purely for learning and portfolio purposes. It has no real users, no production deployment, and no live data. The patient management domain is just a vehicle to implement and demonstrate backend engineering concepts.
 
-### System Architecture Diagram
+**What this project demonstrates:**
 
+| Concept | Implementation |
+|---|---|
+| Microservices architecture | 5 independently deployable Spring Boot services |
+| Synchronous inter-service communication | REST (HTTP/JSON) between gateway and services |
+| Binary RPC | gRPC + Protobuf between patient-service and billing-service |
+| Async event streaming | Apache Kafka (Protobuf events) from patient-service to analytics-service |
+| API security | JWT authentication enforced at the gateway layer (not in individual services) |
+| Caching | Redis with TTL-based cache and automatic eviction on mutation |
+| Containerization | Docker — one image per service, environment-driven config |
+| Container orchestration | Kubernetes — StatefulSets, health probes, resource limits, rolling updates |
+| CI pipeline | GitHub Actions — builds and tests all services on every push |
+
+
+---
+
+
+## Architecture
+
+### System Diagram
+
+```mermaid
+graph TD
+    Client["Client (Postman / Browser)"]
+
+    subgraph K8s["Docker / Kubernetes"]
+        GW["api-gateway :4004\nJWT Validation + Routing"]
+        AUTH["auth-service :4005\nLogin + JWT"]
+        PATIENT["patient-service :4000\nPatient CRUD"]
+        BILLING["billing-service :4001\ngRPC Server :9001"]
+        ANALYTICS["analytics-service :4002\nKafka Consumer"]
+        KAFKA["Apache Kafka :9092"]
+        REDIS["Redis :6379\nCache"]
+        PG_AUTH[("postgres-auth\nauth_db")]
+        PG_PATIENT[("postgres-patient\npatient_db")]
+    end
+
+    Client -->|HTTP| GW
+    GW -->|"/auth/**"| AUTH
+    GW -->|"JWT validated"| PATIENT
+    AUTH --- PG_AUTH
+    PATIENT --- PG_PATIENT
+    PATIENT -->|gRPC| BILLING
+    PATIENT -->|"Kafka — PatientEvent"| KAFKA
+    KAFKA --> ANALYTICS
+    PATIENT <-->|"Cache TTL 10min"| REDIS
 ```
-+--------------------+     +---------------------+     +------------------------------+
-|  Client / Browser  |     |     api-gateway      |     |       auth-service           |
-|                    | --> |      port: 4004       | --> |         port: 4005           |
-|  All requests go   |     |                      |     |  POST /login  -> JWT token   |
-|  to port 4004      |     | JwtValidation filter | <-> |  GET  /validate -> 200/401   |
-+--------------------+     | (calls /validate for |     |  DB: auth-service-db (PG)    |
-                           |  every /api/patients) |     +------------------------------+
-                           |                      |
-                           | StripPrefix: removes  |
-                           | '/api' prefix before  |
-                           | forwarding            |
-                           +----------+-----------+
-                                      |
-                                      | HTTP forward (JWT validated)
-                                      v
-                     +------------------------------------------+
-                     |           patient-service                |
-                     |              port: 4000                  |
-                     |                                          |
-                     |  GET  /patients/get-patients             |
-                     |  GET  /patients/get-patient/{id}         |
-                     |  POST /patients/create-patient           |
-                     |  PUT  /patients/update-patient/{id}      |
-                     |  DEL  /patients/delete-patient/{id}      |
-                     |                                          |
-                     |  +------------+   +------------------+   |
-                     |  | PostgreSQL |   |  Redis Cache     |   |
-                     |  | patient_db |   |  port: 6379      |   |
-                     |  | port: 5000 |   |  TTL: 10 min     |   |
-                     |  +------------+   +------------------+   |
-                     +-------+------------------+---------------+
-                             |                  |
-              gRPC (sync)    |                  |  Kafka (async)
-              on patient     |                  |  topic: "patient"
-              creation       v                  v
-     +--------------------+      +------------------------------+
-     |   billing-service  |      |      analytics-service       |
-     |     port: 4001     |      |          port: 4002          |
-     |  gRPC server: 9001 |      |                              |
-     |                    |      |  Consumes Kafka events       |
-     |  CreateBilling     |      |  Deserializes Protobuf       |
-     |  Account (stub)    |      |  PatientEvent {              |
-     |  -> accountId,     |      |    patientId, name,          |
-     |     status:ACTIVE  |      |    email, event_type }       |
-     +--------------------+      +------------------------------+
 
-  Infrastructure (shared):
-  +-------------------+     +------------------+
-  |   Apache Kafka    |     |      Redis        |
-  |    port: 9092     |     |    port: 6379     |
-  +-------------------+     +------------------+
-```
 ### Communication Patterns
 
-| Pattern | Between | Protocol | Data Format |
+| Pattern | Between | Protocol | Format |
 |---|---|---|---|
-| REST (sync) | Client -> Gateway -> auth-service / patient-service | HTTP/1.1 | JSON |
-| REST (reactive WebClient) | Gateway -> auth-service /validate | HTTP (non-blocking) | Header only |
-| **gRPC** (sync, blocking) | patient-service -> billing-service | HTTP/2 | Protobuf binary |
-| **Kafka** (async) | patient-service -> analytics-service | Message broker | Protobuf binary |
-| **Redis** (in-process) | patient-service <-> Redis | Redis protocol | JSON (Jackson) |
-### Request Flow
+| REST | Client → Gateway → Services | HTTP/1.1 | JSON |
+| Reactive WebClient | Gateway → auth-service `/validate` | HTTP non-blocking | Bearer header |
+| **gRPC** | patient-service → billing-service | HTTP/2 | Protobuf |
+| **Kafka** | patient-service → analytics-service | Async message | Protobuf |
+| **Redis** | patient-service ↔ cache | Redis protocol | JSON |
 
-1. A client logs in via `POST /auth/login` on the gateway.
-2. The gateway forwards to `auth-service /login`, which returns a JWT.
-3. For patient requests (`/api/patients/**`), the gateway applies a custom `JwtValidation` filter:
-   - extracts `Authorization: Bearer <token>`
-   - calls `auth-service /validate` (reactive WebClient)
-   - only forwards to `patient-service` if validation succeeds
-4. When a patient is created:
-   - `patient-service` saves to PostgreSQL
-   - calls `billing-service` over gRPC (`CreateBillingAccount`) — **synchronous**
-   - publishes a Protobuf `PatientEvent` to Kafka topic `patient` — **async**
-   - `analytics-service` consumes and deserializes the event
+### Request Flow — Create Patient
 
-## Service Topology (Ports)
-- **api-gateway**: `4004`
-  - routes `/auth/**` -> `auth-service`
-  - routes `/api/patients/**` -> `patient-service` with JWT validation
-- **auth-service**: `4005`
-  - `POST /login` -> returns JWT
-  - `GET /validate` -> validates JWT (called by gateway)
-- **patient-service**: `4000`
-  - `/patients/*` endpoints
-  - `/health-check` health endpoint (service-direct)
-  - integrated with Redis for caching patient data
-- **billing-service**: `4001` (gRPC server on `9001`)
-- **analytics-service**: `4002`
-- **redis**: `6379` (in-memory cache, optional but recommended)
-
-## API Endpoints
-Base URL (gateway): `http://localhost:4004`
-
-### Authentication (gateway)
-- `POST /auth/login`
-  - request: `{ "email": "...", "password": "..." }`
-  - response: `{ "token": "<jwt>" }`
-
-### Patient APIs (gateway, JWT required)
-- `GET /api/patients/get-patients`
-- `POST /api/patients/create-patient`
-- `PUT /api/patients/update-patient/{id}`
-- `DELETE /api/patients/delete-patient/{id}`
-
-### Patient-service direct endpoint
-- `GET http://localhost:4000/health-check`
-
-## JWT Authentication (auth-service + gateway filter)
-### JWT signing (auth-service)
-`auth-service` uses `jwt.secret` to sign and validate tokens.
-The JWT contains:
-- `sub` = user email
-- `role` = user role
-- expiration = 10 hours
-
-### JWT validation (gateway filter)
-`api-gateway` uses `JwtValidationGatewayFilterFactory` which calls:
-- `GET http://<auth-service>/validate`
-- forwarding header: `Authorization: Bearer <token>`
-
-If the token is missing/invalid, the request is rejected with `401 Unauthorized`.
-
-## Patient Data Model & Validation (patient-service)
-### Entity: `Patient`
-- `id` (UUID)
-- `name`
-- `email` (unique)
-- `address`
-- `dateOfBirth` (LocalDate)
-- `registeredDate` (LocalDate)
-
-### DTO: `PatientRequestDTO`
-- `name`, `email`, `address`, `dateOfBirth` are always required
-- `registeredDate` is required only for create, enforced via `CreatePatientValidationGroup`
-
-### Example: Create a patient (gateway)
-Request:
-- `POST http://localhost:4004/api/patients/create-patient`
-- Header: `Authorization: Bearer <jwt>`
-
-Body:
-```json
-{
-  "name": "Amit Sharma",
-  "email": "amit.sharma@gmail.com",
-  "address": "Pune, Maharashtra",
-  "dateOfBirth": "1996-04-12",
-  "registeredDate": "2024-01-10"
-}
+```
+POST /api/patients/create-patient  (Authorization: Bearer <token>)
+  → api-gateway
+      → JwtValidationFilter → auth-service /validate → 200 OK
+      → patient-service
+          ├── Save to PostgreSQL
+          ├── gRPC → billing-service → CreateBillingAccount   (sync)
+          └── Kafka → topic:"patient" → analytics-service     (async)
 ```
 
-## Kafka Integration (patient-service -> analytics-service)
-### Topic
-- `patient`
+---
 
-### Event contract (proto)
-`patient_event.proto` defines `PatientEvent`:
-- `patientId`
-- `name`
-- `email`
-- `event_type`
+## Tech Stack
 
-### Producer behavior (patient-service)
-On create-patient, `patient-service` sends:
-- `event_type = "PATIENT_CREATED"`
+| | Technology | Purpose |
+|---|---|---|
+| **Language** | Java 21 | All services |
+| **Framework** | Spring Boot 4, Spring Cloud Gateway | Service logic + gateway |
+| **Auth** | JWT (HS512) | Stateless authentication |
+| **Databases** | PostgreSQL 15 (x2) | Auth DB + Patient DB |
+| **Cache** | Redis 7 | Patient read cache, TTL 10 min |
+| **Messaging** | Apache Kafka 3.7 (KRaft) | Async event streaming |
+| **RPC** | gRPC + Protobuf | Billing service calls |
+| **Containers** | Docker | Per-service images |
+| **Orchestration** | Kubernetes (Docker Desktop) | Full K8s deployment |
+| **CI** | GitHub Actions | Build + test on every push |
+| **Build** | Maven | Per-service build tool |
 
-### Consumer behavior (analytics-service)
-`analytics-service` listens:
-- topic: `patient`
-- groupId: `analytics-service`
-It parses the event as `PatientEvent` and logs patient fields.
+---
 
-## gRPC Integration (patient-service -> billing-service)
-### gRPC contract (proto)
-`billing_service.proto` defines:
-- `service BillingService`
-  - `rpc CreateBillingAccount(BillingRequest) returns (BillingResponse)`
+## Services
 
-`BillingRequest`:
-- `patientId`, `name`, `email`
+| Service | Port | Role |
+|---|---|---|
+| `api-gateway` | `4004` (K8s: `30400`) | Entry point — routes requests, validates JWT |
+| `auth-service` | `4005` | Issues and validates JWT tokens |
+| `patient-service` | `4000` | Patient CRUD — orchestrates gRPC + Kafka |
+| `billing-service` | `4001` / gRPC `9001` | Creates billing account on patient creation |
+| `analytics-service` | `4002` | Consumes Kafka events, logs patient activity |
+| `postgres-auth` | `5432` | Database for auth-service (`auth_db`) |
+| `postgres-patient` | `5432` | Database for patient-service (`patient_db`) |
+| `redis` | `6379` | In-memory cache for patient data |
+| `kafka` | `9092` | Event broker (KRaft mode — no Zookeeper) |
 
-`BillingResponse`:
-- `accountId`, `status`
+---
 
-### Producer-side (patient-service)
-`BillingServiceGrpcClient` calls `createBillingAccount` during patient creation.
+## How to Run
 
-Defaults:
-- `billing.service.address` default `localhost`
-- `billing.service.grpc.port` default `9001`
+### Prerequisites
 
-### Server-side (billing-service)
-`BillingGrpcService` currently returns a fixed response:
-- `accountId = "12345"`
-- `status = "ACTIVE"`
+- **Docker Desktop** — with Docker or Kubernetes enabled
+- **Java 21 + Maven** — only needed to build images locally
 
-## Redis Caching (patient-service)
-Redis is used as an in-memory cache to improve performance of frequently-accessed patient data.
+---
 
-### Caching Strategy
-- **Cache Name**: `patients`
-- **Key Format**: `patients::<patient-id>` (e.g., `patients::123e4567-e89b-12d3-a456-426614174000`)
-- **TTL**: 10 minutes (configurable)
-- **Serialization**: JSON
+### Option A — Docker
 
-### Cached Methods in PatientService
-- `getPatient(UUID id)`: Caches individual patient lookups
-  - `@Cacheable(value = "patients", key = "#id")`
-  - First call fetches from PostgreSQL and stores in Redis
-  - Subsequent calls return from Redis (microseconds vs milliseconds from DB)
-- `getPatients()`: Optional caching of the full patient list (use cautiously for large datasets)
+#### 1. Build service images
 
-### Cache Invalidation
-Cache is automatically cleared when patient data is modified:
-- `updatePatient(UUID id, ...)`: Removes cached entry for that patient
-  - `@CacheEvict(value = "patients", key = "#id")`
-- `deletePatient(UUID id)`: Removes cached entry
-  - `@CacheEvict(value = "patients", key = "#id")`
-
-### Benefits
-- **Performance**: Cache hits are 100-1000x faster than database queries
-- **Scalability**: Reduces database load for read-heavy workloads
-- **User Experience**: Faster API response times
-
-### Configuration in application.properties
-```properties
-spring.cache.type=redis
-spring.data.redis.host=localhost
-spring.data.redis.port=6379
-```
-
-### Monitoring Redis Cache
-Connect to Redis and inspect cached keys:
 ```bash
-# Start Redis CLI
-docker exec -it redis redis-cli
-
-# View all keys
-KEYS *
-
-# Get a specific cached patient
-GET patients::<id>
-
-# Monitor real-time cache activity
-MONITOR
-
-# Check cache stats
-INFO stats
+docker build -t auth-service:latest      ./auth-service
+docker build -t patient-service:latest   ./patient-service
+docker build -t billing-service:latest   ./billing-service
+docker build -t analytics-service:latest ./analytics-service
+docker build -t api-gateway:latest       ./api-gateway
 ```
 
-## Configuration Requirements (must provide at runtime)
-These properties are referenced via `@Value(...)` and are not fully defined in service `application.properties` files.
+#### 2. Start infrastructure
 
-### api-gateway
-- `auth.service.url` (example: `http://localhost:4005`)
-  - Spring Boot relaxed binding: set env var `AUTH_SERVICE_URL`
-
-### auth-service
-- `jwt.secret` (required)
-  - Spring Boot relaxed binding: set env var `JWT_SECRET`
-
-### patient-service (has local defaults in application.properties)
-- PostgreSQL:
-  - `spring.datasource.url`
-  - `spring.datasource.username`
-  - `spring.datasource.password`
-- Kafka:
-  - `spring.kafka.bootstrap-servers` (default `localhost:9092`)
-- Redis (caching):
-  - `spring.data.redis.host` (default `localhost`)
-  - `spring.data.redis.port` (default `6379`)
-
-### analytics-service (has default in application.properties)
-- Kafka bootstrap via `SPRING_KAFKA_BOOTSTRAP_SERVERS` (default `localhost:9092`)
-
-## Local Development (practical)
-This project is Dockerized (each microservice has a `Dockerfile`). In practice you need:
-- **Kafka** reachable from the containers at `spring.kafka.bootstrap-servers` (or `SPRING_KAFKA_BOOTSTRAP_SERVERS`)
-- **PostgreSQL** reachable from `patient-service` at `spring.datasource.url`
-- **Redis** reachable from `patient-service` at `spring.data.redis.host` + `spring.data.redis.port` (optional but recommended for caching)
-- **Billing gRPC** reachable from `patient-service` via `BILLING_SERVICE_ADDRESS` + `BILLING_SERVICE_GRPC_PORT` (defaults to `localhost`, which usually won't work inside containers)
-
-### 1. Start dependencies
-Start **Kafka**, **PostgreSQL**, and **Redis** using your Docker setup (or any external services). Ensure the hostnames/IPs you use match what you configure for the services.
-
-Quick Docker commands:
 ```bash
-# PostgreSQL
-docker run -d --name postgres -p 5000:5432 \
-  -e POSTGRES_DB=patient_db \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=admin \
-  -v patient-service-db:/var/lib/postgresql/data \
-  postgres:latest
+# Auth DB
+docker run -d --name auth-service-db \
+  -e POSTGRES_DB=auth_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=admin \
+  postgres:15
 
-# Zookeeper (required for Kafka)
-docker run -d --name zookeeper -p 2181:2181 \
-  -e ZOOKEEPER_CLIENT_PORT=2181 \
-  -e ZOOKEEPER_TICK_TIME=2000 \
-  confluentinc/cp-zookeeper:latest
-
-# Kafka
-docker run -d --name kafka -p 9092:9092 \
-  --link zookeeper \
-  -e KAFKA_BROKER_ID=1 \
-  -e KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 \
-  -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
-  -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
-  confluentinc/cp-kafka:latest
+# Patient DB
+docker run -d --name patient-service-db \
+  -e POSTGRES_DB=patient_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=admin \
+  postgres:15
 
 # Redis
 docker run -d --name redis -p 6379:6379 redis:alpine
+
+# Kafka (KRaft — no Zookeeper)
+docker run -d --name kafka -p 9092:9092 \
+  -e KAFKA_NODE_ID=1 -e KAFKA_PROCESS_ROLES=broker,controller \
+  -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+  -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 \
+  -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093 \
+  -e CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk \
+  apache/kafka:3.7.0
 ```
 
-### 2. Build service images
-Build images from each service folder Dockerfile (order doesn’t matter):
-- `api-gateway/Dockerfile`
-- `auth-service/Dockerfile`
-- `patient-service/Dockerfile`
-- `billing-service/Dockerfile`
-- `analytics-service/Dockerfile`
+#### 3. Key environment variables
 
-### 3. Run containers
-When you run the containers, set at least:
-- `JWT_SECRET` (required by `auth-service` / `auth-service/src/main/java/com/pm/authservice/util/JwtUtil.java`)
-- `AUTH_SERVICE_URL` (required by `api-gateway` / `JwtValidationGatewayFilterFactory`)
-- Kafka: `SPRING_KAFKA_BOOTSTRAP_SERVERS` (or `spring.kafka.bootstrap-servers`) for `patient-service` and `analytics-service`
-- Redis: `SPRING_DATA_REDIS_HOST` + optionally `SPRING_DATA_REDIS_PORT` for `patient-service` (caching)
-- Billing: `BILLING_SERVICE_ADDRESS` + `BILLING_SERVICE_GRPC_PORT` for `patient-service` (billing server is gRPC on port `9001`)
+| Service | Variable | Value |
+|---|---|---|
+| `auth-service` | `JWT_SECRET` | Any 64+ char string |
+| `auth-service` | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://auth-service-db:5432/auth_db` |
+| `api-gateway` | `AUTH_SERVICE_URL` | `http://auth-service:4005` |
+| `patient-service` | `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` |
+| `patient-service` | `BILLING_SERVICE_ADDRESS` | `billing-service` |
 
-Verification tip:
-Make sure `api-gateway` can reach `auth-service` using the same hostname you used in `AUTH_SERVICE_URL`.
+Access the API at: `http://localhost:4004`
 
-### 4. Verify
-Integration tests seed data expects:
-- `email`: `testuser@test.com`
-- `password`: `password123`
+---
 
-Login:
-- `POST http://localhost:4004/auth/login`
+### Option B — Kubernetes
 
-Use token:
-- `GET http://localhost:4004/api/patients/get-patients`
-  - add header `Authorization: Bearer <token>`
+Requires Docker Desktop with **Kubernetes enabled**
+*(Docker Desktop → Settings → Kubernetes → Enable Kubernetes)*
 
-## Testing
-### Unit/startup tests
-Each service has a minimal `contextLoads()` Spring Boot test that verifies the application starts.
+#### 1. Build images
 
-### End-to-end integration tests
-`integration-tests` uses RestAssured and assumes:
-- gateway at `http://localhost:4004`
-- seeded auth user exists
-
-Run:
 ```bash
-cd integration-tests
-./mvnw test
+docker build -t auth-service:latest      ./auth-service
+docker build -t patient-service:latest   ./patient-service
+docker build -t billing-service:latest   ./billing-service
+docker build -t analytics-service:latest ./analytics-service
+docker build -t api-gateway:latest       ./api-gateway
 ```
 
-What it checks:
-- `AuthIntegrationTest`: `/auth/login` works
-- `PatientIntegrationTest`: `/api/patients/get-patients` works with a valid JWT
+#### 2. Deploy
 
-## CI Notes
-`.github/workflows/ci.yml` builds:
-- `patient-service` (includes a PostgreSQL service container)
-- `billing-service`
-- `analytics-service`
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/secrets.yaml
+kubectl apply -f k8s/configmaps.yaml
+kubectl apply -f k8s/infrastructure/
+kubectl apply -f k8s/services/
+```
 
-It runs `./mvnw clean package` per service with DB/Kafka/gRPC env vars where needed.
+#### 3. Verify pods are running
 
+```bash
+kubectl get pods -n patient-management
+```
 
+> Spring Boot services take 60–120 seconds to fully start. The `startupProbe` ensures no traffic is routed until the JVM is ready.
 
+Access the API at: `http://localhost:30400`
+
+#### Useful commands
+
+```bash
+# Watch pods
+kubectl get pods -n patient-management -w
+
+# Tail logs
+kubectl logs -l app=patient-service -n patient-management -f
+
+# Scale a service
+kubectl scale deployment patient-service --replicas=2 -n patient-management
+
+# Rolling update + rollback
+kubectl set image deployment/patient-service patient-service=patient-service:v2 -n patient-management
+kubectl rollout undo deployment/patient-service -n patient-management
+kubectl rollout history deployment/patient-service -n patient-management
+```
+
+---
+
+## API Reference
+
+> **Postman collection:** [`postman_collection.json`](./postman_collection.json) — import into Postman to test all endpoints.
+>
+> Set environment variable `domain`:
+> - Docker: `http://localhost:4004/api`
+> - Kubernetes: `http://localhost:30400/api`
+
+---
+
+### `POST /auth/login`
+
+**No auth required.** Returns a JWT token.
+
+```json
+// Request
+{ "email": "testuser@test.com", "password": "password123" }
+
+// Response 200
+{ "token": "eyJhbGciOiJIUzUxMiJ9..." }
+```
+
+---
+
+> All endpoints below require: `Authorization: Bearer <token>`
+
+---
+
+### `GET /api/patients/get-patients`
+
+Returns all patients. Cache-backed via Redis.
+
+```json
+// Response 200
+[
+  {
+    "id": "5d25ed71-324b-4bd3-bf90-586d6ebd9fbd",
+    "name": "Joshi Rahul",
+    "email": "joshi@example.com",
+    "address": "Mumbai, Maharashtra",
+    "dateOfBirth": "1990-05-15",
+    "registeredDate": "2023-04-01"
+  }
+]
+```
+
+---
+
+### `POST /api/patients/create-patient`
+
+Creates a patient. Triggers gRPC call to `billing-service` and Kafka event to `analytics-service`.
+
+```json
+// Request
+{
+  "name": "Joshi Rahul",
+  "email": "joshi@example.com",
+  "address": "1234 Elm St, Springfield",
+  "dateOfBirth": "1990-05-15",
+  "registeredDate": "2023-04-01"
+}
+
+// Response 201
+{ "id": "5d25ed71-...", "name": "Joshi Rahul", "email": "joshi@example.com" }
+```
+
+---
+
+### `PUT /api/patients/update-patient/{id}`
+
+Updates patient details. Evicts their Redis cache entry.
+
+```json
+// Request (same fields as create, registeredDate not required)
+{ "name": "Joshi Rahul Updated", "email": "joshi@example.com", "address": "...", "dateOfBirth": "1990-05-15" }
+```
+
+---
+
+### `DELETE /api/patients/delete-patient/{id}`
+
+Deletes patient. Evicts cache. Returns `204 No Content`.
+
+---
+
+## Project Structure
+
+```
+.
+├── api-gateway/              Spring Cloud Gateway — routing + JWT filter
+├── auth-service/             Login + JWT issuance/validation
+├── patient-service/          Patient CRUD + gRPC client + Kafka producer + Redis cache
+├── billing-service/          gRPC server (CreateBillingAccount)
+├── analytics-service/        Kafka consumer (PatientEvent)
+├── integration-tests/        RestAssured end-to-end tests
+├── k8s/
+│   ├── namespace.yaml
+│   ├── secrets.yaml
+│   ├── configmaps.yaml
+│   ├── infrastructure/       postgres (x2), redis, kafka
+│   └── services/             all Spring Boot service deployments
+├── .github/workflows/        GitHub Actions CI pipeline
+├── postman_collection.json   Importable Postman collection
+└── README.md
+```
+
+### Data Model — Patient
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Auto-generated |
+| `name` | String | Required |
+| `email` | String | Required, unique |
+| `address` | String | Required |
+| `dateOfBirth` | LocalDate | `YYYY-MM-DD` |
+| `registeredDate` | LocalDate | Required on create |
+
+### Protobuf Contracts
+
+**Kafka — PatientEvent**
+```protobuf
+message PatientEvent {
+  string patientId  = 1;
+  string name       = 2;
+  string email      = 3;
+  string event_type = 4;  // "PATIENT_CREATED"
+}
+```
+
+**gRPC — BillingService**
+```protobuf
+service BillingService {
+  rpc CreateBillingAccount(BillingRequest) returns (BillingResponse);
+}
+message BillingRequest  { string patientId = 1; string name = 2; string email = 3; }
+message BillingResponse { string accountId = 1; string status = 2; }
+```

@@ -1,0 +1,173 @@
+{
+  "info": {
+    "_postman_id": "95aeb648-4965-49a6-851a-6b627f536dd2",
+    "name": "Distributed Microservice Backend Platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "52298735"
+  },
+  "item": [
+    {
+      "name": "Patient Service",
+      "item": [
+        {
+          "name": "Get Patients",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{domain}}/patients/get-patients",
+              "host": [
+                "{{domain}}"
+              ],
+              "path": [
+                "patients",
+                "get-patients"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "create-patient",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"name\": \"Joshi Rahul\",\r\n    \"email\": \"joshi.joshi2@example.com\",\r\n    \"address\": \"1234 Elm Stw, Springfield, IL 62704\",\r\n    \"dateOfBirth\": \"1990-05-15\",\r\n    \"registeredDate\": \"2023-04-01\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{domain}}/patients/create-patient",
+              "host": [
+                "{{domain}}"
+              ],
+              "path": [
+                "patients",
+                "create-patient"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "update-patient",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"address\": \"1234 Elm Stw, Springfield, IL 62704\",\r\n    \"dateOfBirth\": \"1990-05-15\",\r\n    \"email\": \"joshirahul@example.com\",\r\n    \"id\": \"2a68aaa1-c48a-4580-b637-3b6526a4941c\",\r\n    \"name\": \"Joshi Rahul Updated\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{domain}}/patients/update-patient/33810577-c527-4fd4-a8ed-73d549a6227d",
+              "host": [
+                "{{domain}}"
+              ],
+              "path": [
+                "patients",
+                "update-patient",
+                "33810577-c527-4fd4-a8ed-73d549a6227d"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "delete-patient",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{domain}}/patients/delete-patient/84f64405-7a1b-4fa6-9165-2b1d00e5b567",
+              "host": [
+                "{{domain}}"
+              ],
+              "path": [
+                "patients",
+                "delete-patient",
+                "84f64405-7a1b-4fa6-9165-2b1d00e5b567"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth Service",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\": \"testuser@test.com\",\r\n    \"password\": \"password123\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:30400/auth/login",
+              "protocol": "http",
+              "host": [
+                "localhost"
+              ],
+              "port": "30400",
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Token",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "http://localhost:30400/auth/validate",
+              "protocol": "http",
+              "host": [
+                "localhost"
+              ],
+              "port": "30400",
+              "path": [
+                "auth",
+                "validate"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
