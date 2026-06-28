@@ -1,0 +1,66 @@
+###############################################################################
+# postgres-patient.yaml
+# Same pattern as postgres-auth.yaml but for patient-service.
+# Notice: same structure, different names and DB name.
+# This is intentional — in production, each service owns its own DB.
+# (Database-per-service is a core microservices pattern)
+###############################################################################
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-patient           # ← DNS hostname: postgres-patient:5432
+  namespace: patient-management
+spec:
+  selector:
+    app: postgres-patient
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-patient
+  namespace: patient-management
+spec:
+  serviceName: postgres-patient
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-patient
+  template:
+    metadata:
+      labels:
+        app: postgres-patient
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: patient_db    # ← Different DB name from auth's "auth_db"
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: patient-management-secrets
+                  key: POSTGRES_PASSWORD  # ← Same secret, reused across resources
+          volumeMounts:
+            - name: postgres-patient-storage
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-patient-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 512Mi

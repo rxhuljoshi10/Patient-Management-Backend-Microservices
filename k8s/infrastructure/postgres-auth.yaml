@@ -1,0 +1,94 @@
+###############################################################################
+# postgres-auth.yaml
+# Deploys a PostgreSQL database for auth-service.
+#
+# Contains two resources (separated by ---):
+#   1. A Service     → gives pods a stable DNS name to connect to
+#   2. A StatefulSet → runs PostgreSQL with persistent storage
+###############################################################################
+
+# ─── RESOURCE 1: Service ─────────────────────────────────────────────────────
+# A Service gives a stable network address to a set of pods.
+# Without this, pods can only be reached by their IP — and pod IPs change
+# every time a pod restarts. The Service name "postgres-auth" becomes a DNS
+# entry inside the cluster. Any pod can connect to postgres-auth:5432.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-auth            # ← This becomes the hostname: postgres-auth
+  namespace: patient-management
+spec:
+  selector:
+    app: postgres-auth           # ← Route traffic to pods with this label
+  ports:
+    - port: 5432                 # ← Port exposed by the Service
+      targetPort: 5432           # ← Port the container actually listens on
+  clusterIP: None                # ← "Headless" service: pods are addressed directly
+                                 #   This is the standard pattern for StatefulSets
+
+---
+
+# ─── RESOURCE 2: StatefulSet ─────────────────────────────────────────────────
+# A StatefulSet manages stateful workloads (databases).
+# Unlike a Deployment, each pod gets:
+#   - A stable, predictable name: postgres-auth-0, postgres-auth-1, etc.
+#   - Its own persistent volume that survives restarts
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-auth
+  namespace: patient-management
+spec:
+  serviceName: postgres-auth     # ← Must match the Service name above
+  replicas: 1                    # ← One DB instance (fine for dev/learning)
+  selector:
+    matchLabels:
+      app: postgres-auth         # ← StatefulSet manages pods with this label
+
+  # ── Pod Template ─────────────────────────────────────────────────────────
+  # This describes the pod that gets created (and re-created on crash).
+  template:
+    metadata:
+      labels:
+        app: postgres-auth       # ← Must match selector.matchLabels above
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15     # ← Official PostgreSQL 15 image from Docker Hub
+
+          ports:
+            - containerPort: 5432
+
+          env:
+            # POSTGRES_DB: creates this database automatically on first start
+            - name: POSTGRES_DB
+              value: auth_db
+
+            - name: POSTGRES_USER
+              value: postgres
+
+            # Password comes from our Secret — not hardcoded here!
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: patient-management-secrets   # which Secret
+                  key: POSTGRES_PASSWORD             # which key inside it
+
+          # Mount the persistent volume at the path PostgreSQL stores its data
+          volumeMounts:
+            - name: postgres-auth-storage
+              mountPath: /var/lib/postgresql/data
+
+  # ── Volume Claim Templates ────────────────────────────────────────────────
+  # This is what makes StatefulSet special vs Deployment.
+  # For EACH pod replica, K8s automatically creates a separate PersistentVolume.
+  # When the pod restarts, it gets the SAME volume back — data is preserved.
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-auth-storage
+      spec:
+        accessModes:
+          - ReadWriteOnce          # ← Only one pod can write at a time (standard for DB)
+        resources:
+          requests:
+            storage: 512Mi         # ← Request 512MB of disk space

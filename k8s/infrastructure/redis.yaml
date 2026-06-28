@@ -1,0 +1,50 @@
+###############################################################################
+# redis.yaml
+# Redis is a cache — if it restarts, it just starts empty and warms up again.
+# No persistent data needed → regular Deployment (not StatefulSet)
+###############################################################################
+
+# ─── RESOURCE 1: Deployment ──────────────────────────────────────────────────
+# A Deployment manages stateless, interchangeable pods.
+# Key difference from StatefulSet: pods get random names (redis-7d9b4f-xk2lm)
+# and if a pod dies, a brand new pod is created (no persistent identity).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: patient-management
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis               # ← Deployment manages pods with this label
+  template:
+    metadata:
+      labels:
+        app: redis             # ← Must match selector.matchLabels
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine  # ← Alpine = minimal image, much smaller
+          ports:
+            - containerPort: 6379
+          # No env vars needed — Redis works out of the box with no config
+          # No volumeMounts needed — cache data is ephemeral (that's fine)
+
+---
+
+# ─── RESOURCE 2: Service ─────────────────────────────────────────────────────
+# ClusterIP (the default) — only reachable inside the cluster.
+# patient-service will connect to redis:6379 via this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis                  # ← DNS hostname: redis:6379
+  namespace: patient-management
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+  # No clusterIP: None here — regular ClusterIP for Deployment is correct
