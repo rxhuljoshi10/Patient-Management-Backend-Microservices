@@ -1,0 +1,157 @@
+###############################################################################
+# patient-service.yaml
+# The core orchestrator — talks to PostgreSQL, Redis, Kafka, and billing gRPC.
+# This deployment has the most env vars, referencing both ConfigMap and Secret.
+###############################################################################
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: patient-service
+  namespace: patient-management
+spec:
+  replicas: 1   # Single node Docker Desktop — scaling demo complete
+  selector:
+    matchLabels:
+      app: patient-service
+  template:
+    metadata:
+      labels:
+        app: patient-service
+    spec:
+      containers:
+        - name: patient-service
+          image: patient-service:latest
+          imagePullPolicy: Never
+
+          ports:
+            - containerPort: 4000
+
+          # ── Resource Requests & Limits ────────────────────────────────────
+          # requests: minimum guaranteed resources (used for scheduling decisions)
+          # limits:   maximum allowed (pod is killed/throttled if it exceeds this)
+          #
+          # Why this matters:
+          #   Without limits, one misbehaving pod can consume all node CPU/RAM,
+          #   starving every other pod on the same node.
+          # Without requests, K8s can't make smart scheduling decisions.
+          resources:
+            requests:
+              memory: "256Mi"   # K8s guarantees this much RAM for the pod
+              cpu: "250m"       # 250m = 0.25 CPU cores (m = millicores)
+            limits:
+              memory: "768Mi"   # Increased: 2 JVMs on single node need more headroom
+              cpu: "500m"       # Pod is throttled (not killed) if it exceeds this
+
+          # ── Startup Probe ─────────────────────────────────────────────────
+          # THE FIX FOR SLOW-STARTING APPS (Spring Boot, JVM apps in general).
+          #
+          # Problem without startupProbe:
+          #   Liveness probe fires too early → declares pod dead → kills it →
+          #   restart → same thing → infinite restart loop (CrashLoopBackOff)
+          #
+          # How startupProbe works:
+          #   K8s ONLY runs this probe until it passes.
+          #   Liveness and Readiness probes are DISABLED until startupProbe passes.
+          #   failureThreshold × periodSeconds = total startup budget
+          #   12 × 10s = 120 seconds max for Spring Boot to start.
+          #   Once startupProbe passes once, it never runs again.
+          startupProbe:
+            tcpSocket:
+              port: 4000
+            initialDelaySeconds: 20   # Don't even start checking for 20s
+            periodSeconds: 10         # Check every 10s after that
+            failureThreshold: 24      # Allow up to 240s total (24 × 10s) — tuned for Docker Desktop
+
+          # ── Readiness Probe ───────────────────────────────────────────────
+          # Only runs AFTER startupProbe passes.
+          # "Is this pod ready to receive traffic?"
+          readinessProbe:
+            tcpSocket:
+              port: 4000
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # ── Liveness Probe ────────────────────────────────────────────────
+          # Only runs AFTER startupProbe passes.
+          # "Is this pod still alive / not deadlocked?"
+          livenessProbe:
+            tcpSocket:
+              port: 4000
+            periodSeconds: 15
+            failureThreshold: 3
+
+
+
+          env:
+            # ── PostgreSQL ────────────────────────────────────────────────────
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: PATIENT_DB_URL
+
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: PATIENT_DB_USERNAME
+
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: patient-management-secrets
+                  key: POSTGRES_PASSWORD
+
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "update"   # JPA auto-creates the "patient" table on startup
+
+            # ── Kafka ─────────────────────────────────────────────────────────
+            # Spring Boot maps SPRING_KAFKA_BOOTSTRAP_SERVERS → spring.kafka.bootstrap-servers
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: KAFKA_BOOTSTRAP_SERVERS
+
+            # ── Redis cache ───────────────────────────────────────────────────
+            - name: SPRING_DATA_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: REDIS_HOST
+
+            - name: SPRING_DATA_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: REDIS_PORT
+
+            # ── Billing gRPC ──────────────────────────────────────────────────
+            # patient-service uses these to build the gRPC channel:
+            # ManagedChannelBuilder.forAddress(address, port)
+            - name: BILLING_SERVICE_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: BILLING_SERVICE_ADDRESS
+
+            - name: BILLING_SERVICE_GRPC_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: BILLING_SERVICE_GRPC_PORT
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: patient-service          # ← DNS: patient-service:4000
+  namespace: patient-management
+spec:
+  selector:
+    app: patient-service
+  ports:
+    - port: 4000
+      targetPort: 4000

@@ -1,0 +1,59 @@
+###############################################################################
+# billing-service.yaml
+# Pure gRPC server — no REST endpoints, no DB, no Kafka.
+# Exposes: HTTP 4001 (Spring Boot actuator/management) + gRPC 9001 (business)
+#
+# KEY CONCEPT: A Service can expose multiple ports.
+# patient-service connects to billing-service:9001 (gRPC only).
+###############################################################################
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-service
+  namespace: patient-management
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: billing-service
+  template:
+    metadata:
+      labels:
+        app: billing-service
+    spec:
+      containers:
+        - name: billing-service
+          image: billing-service:latest
+          imagePullPolicy: Never  # local image — don't pull from registry
+
+          ports:
+            - name: http
+              containerPort: 4001   # Spring Boot HTTP port
+            - name: grpc
+              containerPort: 9001   # gRPC server port (what patient-service calls)
+          # No env vars needed — billing-service has no external dependencies.
+          # It's a pure gRPC server that just handles incoming requests.
+
+---
+
+# ─── Service with two named ports ────────────────────────────────────────────
+# Both ports are exposed internally. patient-service connects to:
+#   billing-service:9001  (for gRPC calls to CreateBillingAccount)
+# Naming ports ("http", "grpc") is optional but good practice — it lets
+# you reference them by name instead of number in other manifests.
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-service          # ← DNS: billing-service:9001
+  namespace: patient-management
+spec:
+  selector:
+    app: billing-service
+  ports:
+    - name: http
+      port: 4001
+      targetPort: 4001
+    - name: grpc
+      port: 9001
+      targetPort: 9001

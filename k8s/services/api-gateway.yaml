@@ -1,0 +1,65 @@
+###############################################################################
+# api-gateway.yaml
+# The single entry point for all external traffic.
+# Routes /auth/** → auth-service and /api/patients/** → patient-service.
+# Applies JWT validation filter on every protected route.
+#
+# KEY CONCEPT: NodePort Service
+# ClusterIP = reachable only inside the cluster
+# NodePort   = also reachable from outside (your laptop) on a fixed port
+# LoadBalancer = used in cloud (AWS/GCP), gets a real external IP
+#
+# With NodePort, K8s picks a port in the range 30000–32767 (or you specify one).
+# You then reach the service at: localhost:<nodePort>
+###############################################################################
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: patient-management
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: api-gateway:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 4004
+          env:
+            # The gateway's JwtValidationFilter calls auth-service:4005/validate
+            # AUTH_SERVICE_URL tells it where auth-service lives inside the cluster
+            - name: AUTH_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: patient-management-config
+                  key: AUTH_SERVICE_URL
+
+---
+
+# ─── NodePort Service ─────────────────────────────────────────────────────────
+# type: NodePort makes the service reachable from your laptop.
+# nodePort: 30400 → you'll hit http://localhost:30400 in Postman
+# (We pick 30400 to be memorable — maps to service port 4004)
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: patient-management
+spec:
+  type: NodePort              # ← Key difference from ClusterIP
+  selector:
+    app: api-gateway
+  ports:
+    - port: 4004              # Port inside the cluster
+      targetPort: 4004        # Port the container listens on
+      nodePort: 30400         # Port on your laptop (must be 30000-32767)
+                              # Access via: http://localhost:30400
