@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: patient-management-config
+  namespace: patient-management
+data:
+  # ── Database ──────────────────────────────────────────────────────────────
+  # Inside K8s, services find each other by their Service name (DNS).
+  # "postgres-auth" and "postgres-patient" will be the names of our DB Services.
+  AUTH_DB_URL: "jdbc:postgresql://postgres-auth:5432/auth_db"  # matches POSTGRES_DB set in StatefulSet
+  AUTH_DB_USERNAME: "postgres"
+  AUTH_JPA_DDL_AUTO: "update"
+  AUTH_SQL_INIT_MODE: "always"
+
+  PATIENT_DB_URL: "jdbc:postgresql://postgres-patient:5432/patient_db"
+  PATIENT_DB_USERNAME: "postgres"
+
+  # ── Kafka ─────────────────────────────────────────────────────────────────
+  # "kafka" will be the name of our Kafka Service inside the cluster
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  # "redis" will be the name of our Redis Service inside the cluster
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # ── Inter-service URLs ────────────────────────────────────────────────────
+  # auth-service URL — used by api-gateway's JwtValidationFilter
+  AUTH_SERVICE_URL: "http://auth-service:4005"
+
+  # billing-service gRPC — used by patient-service's BillingServiceGrpcClient
+  BILLING_SERVICE_ADDRESS: "billing-service"
+  BILLING_SERVICE_GRPC_PORT: "9001"
